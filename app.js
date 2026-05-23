@@ -1,12 +1,17 @@
     (function () {
-      var GEN_PATH = "/v1/images/generations";
-      var EDIT_PATH = "/v1/images/edits";
+      var DEFAULT_GEN_PATH = "/v1/images/generations";
+      var DEFAULT_EDIT_PATH = "/v1/image/edit";
       var HISTORY_KEY = "imageStudioHistory";
+      var GEN_PATH_KEY = "imageStudioGenPath";
+      var EDIT_PATH_KEY = "imageStudioEditPath";
       var MAX_HISTORY = 24;
       var baseUrlEl = document.getElementById("baseUrl");
       var apiKeyEl = document.getElementById("apiKey");
+      var genPathEl = document.getElementById("genPath");
+      var editPathEl = document.getElementById("editPath");
       var logEl = document.getElementById("log");
       var galleryEl = document.getElementById("gallery");
+      var loadingIndicator = document.getElementById("loadingIndicator");
       var historyGalleryEl = document.getElementById("historyGallery");
       var modeStatus = document.getElementById("modeStatus");
       var promptStatus = document.getElementById("promptStatus");
@@ -22,7 +27,8 @@
       var historyOverlay = document.getElementById("historyOverlay");
       var batchOverlay = document.getElementById("batchOverlay");
       var templateOverlay = document.getElementById("templateOverlay");
-      var batchPromptsEl = document.getElementById("batchPrompts");
+      var batchPromptListEl = document.getElementById("batchPromptList");
+      var batchCountEl = document.getElementById("batchCount");
       var templateGridEl = document.getElementById("templateGrid");
       var credentialUrlText = document.getElementById("credentialUrlText");
       var credentialKeyText = document.getElementById("credentialKeyText");
@@ -32,23 +38,70 @@
         return String(s || "").replace(/\/+$/, "");
       }
 
+      function log(msg, obj) {
+        var text = typeof obj !== "undefined" ? msg + "\n" + JSON.stringify(obj, null, 2) : String(msg);
+        logEl.textContent = text;
+      }
+
+      function setLoading(active) {
+        if (!loadingIndicator) return;
+        loadingIndicator.classList.toggle("active", !!active);
+        loadingIndicator.setAttribute("aria-hidden", active ? "false" : "true");
+      }
+
+      function setBusy(btn, busy) {
+        btn.disabled = !!busy;
+        btn.textContent = busy ? "请求中…" : btn.dataset.label || btn.textContent;
+        setLoading(busy);
+      }
+
+      function ensureKey() {
+        var k = (apiKeyEl.value || "").trim();
+        if (!k) {
+          alert("请填写 Bearer Token（sk-…）");
+          return null;
+        }
+        return k;
+      }
+
+      function ensureBaseUrl() {
+        var base = stripSlash(baseUrlEl.value.trim());
+        if (!base) {
+          alert("请在设置里填写账号绑定的 API Base URL");
+          setSettingsOpen(true);
+          return null;
+        }
+        return base;
+      }
+
+      function selectedGenPath() {
+        return genPathEl && genPathEl.value ? genPathEl.value : DEFAULT_GEN_PATH;
+      }
+
+      function selectedEditPath() {
+        return editPathEl && editPathEl.value ? editPathEl.value : DEFAULT_EDIT_PATH;
+      }
+
       function maskValue(value) {
-        var text = String(value || "");
-        if (text.length <= 10) return text;
-        return text.slice(0, 6) + "…" + text.slice(-4);
+        value = String(value || "");
+        if (!value) return "未填写";
+        if (value.length <= 14) return "已保存";
+        return value.slice(0, 8) + "…" + value.slice(-6);
+      }
+
+      function extensionFromMime(mime) {
+        mime = String(mime || "image/png").toLowerCase();
+        if (mime.indexOf("jpeg") !== -1 || mime.indexOf("jpg") !== -1) return "jpg";
+        if (mime.indexOf("webp") !== -1) return "webp";
+        if (mime.indexOf("gif") !== -1) return "gif";
+        return "png";
       }
 
       function activeCount() {
         if (currentMode !== "gen") return 1;
         var model = document.getElementById("genModel").value;
         var n = parseInt(document.getElementById("genN").value, 10) || 1;
-        return model === "gpt-image-2" ? n : 1;
-      }
-
-      function extensionFromMime(mime) {
-        if (/jpe?g/i.test(mime)) return "jpg";
-        if (/webp/i.test(mime)) return "webp";
-        return "png";
+        return model === "gpt-image-2" ? Math.max(1, Math.min(4, n)) : 1;
       }
 
       function setBatchOpen(open) {
@@ -61,23 +114,56 @@
         templateOverlay.setAttribute("aria-hidden", open ? "false" : "true");
       }
 
-      function log(msg, obj) {
-        var text = typeof obj !== "undefined" ? msg + "\n" + JSON.stringify(obj, null, 2) : String(msg);
-        logEl.textContent = text;
+      function updateBatchCount() {
+        if (!batchCountEl) return;
+        batchCountEl.textContent = String(batchPromptListEl.querySelectorAll(".batch-item").length);
       }
 
-      function setBusy(btn, busy) {
-        btn.disabled = !!busy;
-        btn.textContent = busy ? "请求中…" : btn.dataset.label || btn.textContent;
+      function refreshBatchTitles() {
+        batchPromptListEl.querySelectorAll(".batch-item").forEach(function (item, index) {
+          var title = item.querySelector(".batch-item-title");
+          var input = item.querySelector(".batch-prompt-input");
+          if (title) title.textContent = "提示词 " + (index + 1);
+          if (input) input.placeholder = "输入第 " + (index + 1) + " 条提示词…";
+        });
+        updateBatchCount();
       }
 
-      function ensureKey() {
-        var k = (apiKeyEl.value || "").trim();
-        if (!k) {
-          alert("请填写 Bearer Token（sk-…）");
-          return null;
-        }
-        return k;
+      function addBatchPrompt(value) {
+        var item = document.createElement("div");
+        var head = document.createElement("div");
+        var title = document.createElement("span");
+        var remove = document.createElement("button");
+        var input = document.createElement("textarea");
+        item.className = "batch-item";
+        head.className = "batch-item-head";
+        title.className = "batch-item-title";
+        remove.type = "button";
+        remove.className = "secondary-button";
+        remove.textContent = "删除";
+        input.className = "batch-prompt-input";
+        input.value = value || "";
+        remove.addEventListener("click", function () {
+          if (batchPromptListEl.querySelectorAll(".batch-item").length <= 1) {
+            input.value = "";
+            return;
+          }
+          item.remove();
+          refreshBatchTitles();
+        });
+        head.appendChild(title);
+        head.appendChild(remove);
+        item.appendChild(head);
+        item.appendChild(input);
+        batchPromptListEl.appendChild(item);
+        refreshBatchTitles();
+        input.focus();
+      }
+
+      function getBatchPrompts() {
+        return Array.prototype.slice.call(batchPromptListEl.querySelectorAll(".batch-prompt-input"))
+          .map(function (input) { return input.value.trim(); })
+          .filter(Boolean);
       }
 
       function setSettingsOpen(open) {
@@ -94,7 +180,8 @@
       async function generateImages(promptText, options) {
         var token = ensureKey();
         if (!token) return null;
-        var base = stripSlash(baseUrlEl.value.trim());
+        var base = ensureBaseUrl();
+        if (!base) return null;
         var model = options.model;
         var n = options.n;
         var body = {
@@ -106,7 +193,7 @@
           n: n
         };
 
-        var resp = await fetch(base + GEN_PATH, {
+        var resp = await fetch(base + selectedGenPath(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -145,6 +232,8 @@
         var key = apiKeyEl.value.trim();
         localStorage.setItem("imageStudioBaseUrl", base);
         localStorage.setItem("imageStudioApiKey", key);
+        localStorage.setItem(GEN_PATH_KEY, selectedGenPath());
+        localStorage.setItem(EDIT_PATH_KEY, selectedEditPath());
         setSettingsOpen(false);
         updateStatus();
       }
@@ -167,15 +256,16 @@
       }
 
       async function runBatchGeneration() {
-        var prompts = batchPromptsEl.value.split(/\n+/).map(function (line) { return line.trim(); }).filter(Boolean);
+        var prompts = getBatchPrompts();
         if (!prompts.length) {
-          alert("请先输入批量提示词");
+          alert("请先添加并填写至少一个提示词对话框");
           return;
         }
         var baseOptions = currentGenerationOptions();
         var btn = document.getElementById("btnRunBatch");
         btn.disabled = true;
         btn.textContent = "批量执行中…";
+        setLoading(true);
         try {
           for (var i = 0; i < prompts.length; i++) {
             log("批量生成 " + (i + 1) + "/" + prompts.length, { prompt: prompts[i] });
@@ -193,6 +283,7 @@
         } finally {
           btn.disabled = false;
           btn.textContent = "开始批量";
+          setLoading(false);
         }
       }
 
@@ -395,6 +486,7 @@
       });
 
       document.getElementById("btnRunBatch").addEventListener("click", runBatchGeneration);
+      document.getElementById("btnAddBatchPrompt").addEventListener("click", function () { addBatchPrompt(""); });
       bindTemplateButtons();
 
       document.getElementById("openHistoryRail").addEventListener("click", function (event) {
@@ -429,7 +521,7 @@
 
       document.getElementById("saveCredentials").addEventListener("click", saveCredentials);
 
-      [baseUrlEl, apiKeyEl, document.getElementById("genModel"), document.getElementById("editModel"), document.getElementById("genImageSize"), document.getElementById("editImageSize"), document.getElementById("genN")].forEach(function (el) {
+      [baseUrlEl, apiKeyEl, genPathEl, editPathEl, document.getElementById("genModel"), document.getElementById("editModel"), document.getElementById("genImageSize"), document.getElementById("editImageSize"), document.getElementById("genN")].forEach(function (el) {
         el.addEventListener("input", updateStatus);
         el.addEventListener("change", updateStatus);
       });
@@ -440,7 +532,8 @@
       genBtn.addEventListener("click", async function () {
         var token = ensureKey();
         if (!token) return;
-        var base = stripSlash(baseUrlEl.value.trim());
+        var base = ensureBaseUrl();
+        if (!base) return;
         var model = document.getElementById("genModel").value;
         var n = parseInt(document.getElementById("genN").value, 10) || 1;
         if (model !== "gpt-image-2") n = 1;
@@ -454,7 +547,7 @@
           n: n
         };
 
-        var url = base + GEN_PATH;
+        var url = base + selectedGenPath();
         setBusy(genBtn, true);
         log("POST " + url, body);
         updateStatus();
@@ -503,7 +596,8 @@
           return;
         }
 
-        var base = stripSlash(baseUrlEl.value.trim());
+        var base = ensureBaseUrl();
+        if (!base) return;
         var fd = new FormData();
         fd.append("model", document.getElementById("editModel").value);
         fd.append("prompt", document.getElementById("editPrompt").value.trim());
@@ -516,7 +610,7 @@
           fd.append("image", filesInput.files[i], filesInput.files[i].name || "image.png");
         }
 
-        var url = base + EDIT_PATH;
+        var url = base + selectedEditPath();
         setBusy(editBtn, true);
         log("POST multipart " + url + "\n(字段: model, prompt, response_format, image_size, aspect_ratio, n, image×" + filesInput.files.length + ")");
         updateStatus();
@@ -563,10 +657,17 @@
         updateStatus();
       });
 
-      var savedBaseUrl = localStorage.getItem("imageStudioBaseUrl") || "";
+      var savedBaseUrl = localStorage.getItem("imageStudioBaseUrl") || "https://api.xiaoleai.team";
       var savedApiKey = localStorage.getItem("imageStudioApiKey") || "";
+      var savedGenPath = localStorage.getItem(GEN_PATH_KEY) || DEFAULT_GEN_PATH;
+      var savedEditPath = localStorage.getItem(EDIT_PATH_KEY) || DEFAULT_EDIT_PATH;
       baseUrlEl.value = savedBaseUrl;
       apiKeyEl.value = savedApiKey;
+      genPathEl.value = savedGenPath;
+      editPathEl.value = savedEditPath;
+      ["赛博朋克城市夜景海报", "清新电商产品图", "电影感人物肖像"].forEach(function (prompt) {
+        addBatchPrompt(prompt);
+      });
       renderEmpty();
       renderHistory();
       setSettingsOpen(false);
