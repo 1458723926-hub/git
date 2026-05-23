@@ -22,18 +22,46 @@
         <div class="credentials-grid">
           <div class="field">
             <label for="baseUrl">Base URL</label>
-            <input type="text" id="baseUrl" value="" placeholder="请输入 API Base URL" autocomplete="off" />
+            <input type="text" id="baseUrl" value="" placeholder="请输入账号绑定的 API Base URL" autocomplete="off" />
           </div>
           <div class="field">
             <label for="apiKey">Bearer Key</label>
             <input type="password" id="apiKey" placeholder="sk-xxxxxxxx" autocomplete="off" />
           </div>
+          <div class="field">
+            <label for="genPath">文生图接口路径</label>
+            <select id="genPath">
+              <option value="/v1/images/generations">/v1/images/generations</option>
+              <option value="/v1/image/created">/v1/image/created（兼容旧接口）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="editPath">图编辑接口路径</label>
+            <select id="editPath">
+              <option value="/v1/image/edit">/v1/image/edit（兼容旧接口）</option>
+              <option value="/v1/images/edits">/v1/images/edits</option>
+            </select>
+          </div>
         </div>
-        <p class="hint">如果出现 CORS 报错，请使用同源后端转发，或把 Base URL 指向本机代理。接口路径已固定为标准 Images API。</p>
+        <p class="hint">如果出现 AGENT_DOMAIN_MISMATCH，请确认 Base URL 是当前 Key 绑定的代理域名；如果接口不通，可切换到“兼容旧接口”路径再试。</p>
         <div class="credentials-actions">
           <button type="button" id="saveCredentials" class="save-button">保存设置</button>
         </div>
       </div>
+    </section>
+  </div>
+
+  <div class="history-overlay" id="historyOverlay" aria-hidden="true">
+    <section class="panel-card settings-card history-drawer" id="history" role="dialog" aria-modal="true" aria-label="历史图片">
+      <div class="credentials-head">
+        <h2>历史图片</h2>
+        <div class="credentials-summary">
+          <span class="credential-chip">本地保存最近 24 张</span>
+          <button type="button" id="btnClearHistory" class="secondary-button">清空历史</button>
+          <button type="button" id="closeHistory" class="secondary-button">关闭</button>
+        </div>
+      </div>
+      <div class="history-grid empty" id="historyGallery">暂无历史图片</div>
     </section>
   </div>
 
@@ -48,31 +76,17 @@
         </div>
       </div>
       <div class="field">
-        <label for="batchPrompts">批量提示词</label>
-        <textarea id="batchPrompts" rows="12" placeholder="输入多条提示词，每行一条。\n例如：\n赛博朋克城市夜景海报\n清新电商产品图\n电影感人物肖像">赛博朋克城市夜景海报
-清新电商产品图
-电影感人物肖像</textarea>
-        <p class="hint">会按顺序逐条生成，使用当前的模型、尺寸和比例设置。</p>
+        <label>批量提示词对话框</label>
+        <p class="hint">每个对话框会单独发起一次生成请求，结果会自动保存到历史。</p>
+        <div class="batch-list" id="batchPromptList"></div>
+        <div class="batch-toolbar">
+          <span class="credential-chip">当前 <span id="batchCount">0</span> 个对话框</span>
+          <button type="button" id="btnAddBatchPrompt" class="secondary-button">添加对话框</button>
+        </div>
       </div>
       <div class="actions" style="margin-top:12px;">
         <button type="button" id="btnRunBatch" class="primary-button" style="width:auto;min-width:160px;">开始批量</button>
       </div>
-    </section>
-  </div>
-
-  <div class="history-overlay" id="historyOverlay" aria-hidden="true">
-    <section class="panel-card settings-card history-drawer" id="history" role="dialog" aria-modal="true" aria-label="历史图片">
-      <div class="history-card">
-        <div class="history-head">
-          <h2>历史图片</h2>
-          <p>保存在当前浏览器本地</p>
-        </div>
-        <div>
-          <button type="button" id="btnClearHistory" class="secondary-button">清空历史</button>
-          <button type="button" id="closeHistory" class="secondary-button">关闭</button>
-        </div>
-      </div>
-      <div class="history-grid empty" id="historyGallery">暂无历史图片</div>
     </section>
   </div>
 
@@ -277,6 +291,13 @@
 
           <div class="gallery-shell">
             <div class="images empty" id="gallery"></div>
+            <div class="loading-indicator" id="loadingIndicator" aria-hidden="true">
+              <div class="loading-card">
+                <div class="loading-orb" aria-hidden="true"></div>
+                <strong>正在生成图片</strong>
+                <p>请求已发送，请稍等片刻…</p>
+              </div>
+            </div>
           </div>
 
           <details class="log-card" open>
