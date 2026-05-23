@@ -60,6 +60,22 @@
     </section>
   </div>
 
+  <div class="history-overlay" id="historyOverlay" aria-hidden="true">
+    <section class="panel-card settings-card history-drawer" id="history" role="dialog" aria-modal="true" aria-label="历史图片">
+      <div class="history-card">
+        <div class="history-head">
+          <h2>历史图片</h2>
+          <p>保存在当前浏览器本地</p>
+        </div>
+        <div>
+          <button type="button" id="btnClearHistory" class="secondary-button">清空历史</button>
+          <button type="button" id="closeHistory" class="secondary-button">关闭</button>
+        </div>
+      </div>
+      <div class="history-grid empty" id="historyGallery">暂无历史图片</div>
+    </section>
+  </div>
+
   <div class="template-overlay" id="templateOverlay" aria-hidden="true">
     <section class="panel-card settings-card template-drawer" id="templates" role="dialog" aria-modal="true" aria-label="提示词模板">
       <div class="credentials-head">
